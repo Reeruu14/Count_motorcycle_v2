@@ -361,24 +361,74 @@ def process_frame(frame, model, conf, iou):
     if frame is None:
         return None, []
     
-    # Run inference
-    results = model(frame, conf=conf, iou=iou, verbose=False)
+    try:
+        # Ensure frame is numpy array
+        if not isinstance(frame, np.ndarray):
+            frame = np.array(frame)
+        
+        # Handle RGBA images - convert to RGB by dropping alpha channel
+        if len(frame.shape) == 3 and frame.shape[2] == 4:
+            # RGBA -> RGB (drop alpha channel)
+            frame = frame[:, :, :3]
+        
+        # Ensure frame has correct shape (H, W, C)
+        if len(frame.shape) != 3:
+            return None, []
+        
+        if frame.shape[2] != 3:
+            return None, []
+        
+        # IMPORTANT: PIL loads images as RGB, but YOLO expects BGR
+        # Convert RGB -> BGR for YOLO inference
+        if CV2_AVAILABLE:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        else:
+            # Fallback: manual conversion RGB -> BGR
+            frame = frame[:, :, ::-1].copy()
+        
+        # Ensure uint8 format
+        if frame.dtype != np.uint8:
+            frame = frame.astype(np.uint8)
+        
+        # Resize if needed to reasonable size (max 1280 width for safety)
+        h, w = frame.shape[:2]
+        if w > 1280:
+            scale = 1280 / w
+            new_w = 1280
+            new_h = int(h * scale)
+            if CV2_AVAILABLE:
+                frame = cv2.resize(frame, (new_w, new_h))
+            else:
+                # Convert to RGB for PIL, resize, convert back to BGR
+                frame_rgb = frame[:, :, ::-1]
+                frame_pil = Image.fromarray(frame_rgb.astype('uint8'))
+                frame_pil = frame_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                frame = np.array(frame_pil)[:, :, ::-1].copy()
+        
+        # Run inference with error handling
+        results = model(frame, conf=conf, iou=iou, verbose=False)
+        
+        # Draw results
+        annotated_frame = results[0].plot()
+        
+        # Extract detections as simple box coordinates
+        detections = []
+        if results[0].boxes:
+            for box in results[0].boxes:
+                try:
+                    # Extract coordinates as list
+                    coords = box.xyxy[0].cpu().numpy()
+                    detections.append(coords)
+                except:
+                    pass
+        
+        return annotated_frame, detections
     
-    # Draw results
-    annotated_frame = results[0].plot()
-    
-    # Extract detections as simple box coordinates
-    detections = []
-    if results[0].boxes:
-        for box in results[0].boxes:
-            try:
-                # Extract coordinates as list
-                coords = box.xyxy[0].cpu().numpy()
-                detections.append(coords)
-            except:
-                pass
-    
-    return annotated_frame, detections
+    except Exception as e:
+        print(f"Error in process_frame: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return None, []
 
 
 def main():
@@ -644,31 +694,53 @@ def main():
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     cap.set(cv2.CAP_PROP_FPS, 30)
                     
-                    # Disable auto-focus (multiple attempts untuk berbagai kamera)
+                    # Disable auto-focus (safe properties)
                     cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-                    cap.set(28, 0)  # CAP_PROP_AUTOFOCUS alternative
-                    cap.set(38, 0)  # CAP_PROP_AUTO_FOCUS alternative
                     
-                    # Disable auto-exposure (aggressive)
-                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)  # Auto-exposure off
-                    cap.set(cv2.CAP_PROP_EXPOSURE, -8)  # Manual exposure (lebih terang)
-                    cap.set(15, -8)  # CAP_PROP_EXPOSURE alternative
+                    # Disable auto-exposure (safe properties)
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)
+                    cap.set(cv2.CAP_PROP_EXPOSURE, -8)
                     
-                    # Disable zoom dan stabilisasi
-                    cap.set(cv2.CAP_PROP_ZOOM, 0)  # No zoom
-                    cap.set(27, 0)  # Disable stabilization
-                    cap.set(cv2.CAP_PROP_FOCUS_MODE, 0)  # Manual focus mode
-                    
-                    # Set fixed focus distance (default jauh)
-                    cap.set(39, 0)  # CAP_PROP_FOCUS_ABSOLUTE = 0 (far)
-                    
-                    # Lock brightness dan saturation
+                    # Lock brightness dan contrast (safe)
                     cap.set(cv2.CAP_PROP_BRIGHTNESS, 100)
                     cap.set(cv2.CAP_PROP_CONTRAST, 50)
                     cap.set(cv2.CAP_PROP_SATURATION, 50)
                     
-                    # Additional stabilization disable
-                    cap.set(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U, -1)  # Auto white balance off
+                    # Try additional properties (may not be available on all cameras)
+                    try:
+                        cap.set(cv2.CAP_PROP_ZOOM, 0)
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(28, 0)  # Alternative AUTOFOCUS
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(38, 0)  # Alternative AUTO_FOCUS
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(15, -8)  # Alternative EXPOSURE
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(27, 0)  # Disable stabilization
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(39, 0)  # FOCUS_ABSOLUTE
+                    except:
+                        pass
+                    
+                    try:
+                        cap.set(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U, -1)
+                    except:
+                        pass
                 except ImportError:
                     st.error("❌ OpenCV (cv2) tidak tersedia. Instalasi dengan: pip install opencv-python")
                     st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
@@ -794,54 +866,80 @@ def main():
         )
         
         if uploaded_image is not None:
-            # Convert to numpy array
-            image = Image.open(uploaded_image)
-            image_array = np.array(image)
-            
-            # Process image
-            image_bgr = image_array
-            
-            # Process image
-            annotated_frame, detections = process_frame(
-                image_bgr,
-                st.session_state.model,
-                conf_threshold,
-                iou_threshold
-            )
-            
-            # Display results
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("### Original Image")
-                st.image(image, use_column_width=True)
-            
-            with col2:
-                st.markdown("### Detection Result")
-                st.image(annotated_frame, use_column_width=True)
-            
-            # Show statistics
-            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("🏍️ Total Motorcycles Detected", len(detections))
-            
-            with col2:
+            try:
+                # Convert to numpy array
+                image = Image.open(uploaded_image)
+                st.write(f"📊 Image: {image.format}, {image.mode}, {image.size}")
+                
+                image_array = np.array(image)
+                st.write(f"📊 Array: shape={image_array.shape}, dtype={image_array.dtype}")
+                
+                # Process image (RGB array -> process_frame will convert to BGR)
+                annotated_frame, detections = process_frame(
+                    image_array,
+                    st.session_state.model,
+                    conf_threshold,
+                    iou_threshold
+                )
+                
+                # Validate and convert annotated_frame
+                if annotated_frame is None:
+                    st.error("❌ Gagal memproses gambar - cek console untuk error details")
+                    return
+                
+                st.write(f"📊 Result: shape={annotated_frame.shape}, dtype={annotated_frame.dtype}")
+                
+                # Ensure proper format for display
+                if isinstance(annotated_frame, np.ndarray):
+                    # YOLO returns BGR, convert to RGB for display
+                    if len(annotated_frame.shape) == 3 and annotated_frame.shape[2] == 3:
+                        # Convert BGR -> RGB (manual swap to avoid cv2 scope issue)
+                        display_frame = annotated_frame[:, :, ::-1].copy()
+                    else:
+                        display_frame = annotated_frame
+                    
+                    # Convert to PIL Image
+                    display_frame = Image.fromarray(display_frame.astype('uint8'))
+                else:
+                    display_frame = annotated_frame
+                
+                # Display results
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("### Original Image")
+                    st.image(image, use_column_width=True)
+                
+                with col2:
+                    st.markdown("### Detection Result")
+                    st.image(display_frame, use_column_width=True)
+                
+                # Show statistics
+                st.markdown("---")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("🏍️ Total Motorcycles Detected", len(detections))
+                
+                with col2:
+                    if detections:
+                        st.metric("📍 Detections Found", len(detections))
+                
+                with col3:
+                    if detections:
+                        st.metric("✅ Status", "Detected")
+                
+                # Show detailed detections
                 if detections:
-                    avg_conf = np.mean([d['conf'] for d in detections])
-                    st.metric("Average Confidence", f"{avg_conf:.2%}")
+                    st.markdown("### 📋 Detection Details")
+                    for i, det in enumerate(detections, 1):
+                        x1, y1, x2, y2 = det
+                        st.write(f"**Detection {i}**: Box=({int(x1)}, {int(y1)}) to ({int(x2)}, {int(y2)})")
             
-            with col3:
-                if detections:
-                    max_conf = max([d['conf'] for d in detections])
-                    st.metric("Max Confidence", f"{max_conf:.2%}")
-            
-            # Show detailed detections
-            if detections:
-                st.markdown("### 📋 Detection Details")
-                for i, det in enumerate(detections, 1):
-                    st.write(f"**Detection {i}**: Confidence = {det['conf']:.2%}")
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+                import traceback
+                st.write(traceback.format_exc())
 
     elif detection_mode == "🎥 Upload Video":
         st.subheader("🎥 Video Detection")
@@ -858,37 +956,66 @@ def main():
             with open(temp_video_path, "wb") as f:
                 f.write(uploaded_video.getbuffer())
             
-            # Open video with imageio
+            # Get total frames using OpenCV (more reliable than imageio)
             try:
-                video_data = imageio.get_reader(temp_video_path)
-                fps = int(video_data.get_meta_data().get('fps', 30))
-                
-                # Get total frames without loading all (more efficient)
+                # Re-import cv2 locally to ensure it's available
                 try:
-                    total_frames = video_data.get_length()
+                    import cv2 as cv2_local
+                    cap = cv2_local.VideoCapture(temp_video_path)
+                    total_frames = int(cap.get(cv2_local.CAP_PROP_FRAME_COUNT))
+                    fps = int(cap.get(cv2_local.CAP_PROP_FPS))
+                    cap.release()
+                    use_cv2 = True
                 except:
-                    # Fallback: estimate or load with limit
-                    st.warning("⚠️ Tidak bisa mendapat jumlah frame pasti, loading frame preview...")
-                    total_frames = 100  # Default estimate
+                    use_cv2 = False
+                
+                if use_cv2 and total_frames <= 0:
+                    raise ValueError("Cannot determine frame count")
+                
+                if not use_cv2:
+                    # Fallback: use imageio
+                    video_data = imageio.get_reader(temp_video_path)
+                    fps = int(video_data.get_meta_data().get('fps', 30))
+                    total_frames = 50  # Safe default
             except Exception as e:
                 st.error(f"❌ Gagal membuka video: {str(e)}")
+                if os.path.exists(temp_video_path):
+                    os.remove(temp_video_path)
                 return
             
-            st.info(f"📊 FPS: {fps} | Est. Total Frames: {total_frames if total_frames != 100 else '?'}")
+            # Ensure we have valid frame count
+            if total_frames < 1:
+                total_frames = 1
+            
+            st.info(f"📊 FPS: {fps} | Total Frames: {total_frames}")
             
             # Frame slider (load on-demand)
             frame_number = st.slider("Select frame:", 0, total_frames - 1, 0)
             
             try:
-                # Load only the selected frame (not all frames!)
-                video_data.set_image_index(frame_number)
-                frame = video_data.get_data(frame_number)
+                # Use OpenCV to load specific frame (more reliable)
+                if use_cv2:
+                    cap = cv2_local.VideoCapture(temp_video_path)
+                    cap.set(cv2_local.CAP_PROP_POS_FRAMES, frame_number)
+                    ret, frame = cap.read()
+                    cap.release()
+                    
+                    if not ret:
+                        st.error(f"❌ Tidak bisa load frame {frame_number}")
+                        return
+                    
+                    # Keep as BGR for YOLO processing!
+                    # Only convert to RGB for display
+                else:
+                    # Fallback: use imageio
+                    video_data = imageio.get_reader(temp_video_path)
+                    frame = video_data.get_data(frame_number)
                 
                 # Ensure frame is numpy array
                 if not isinstance(frame, np.ndarray):
                     frame = np.array(frame)
                 
-                # Process frame
+                # Process frame (function handles BGR format)
                 annotated_frame, detections = process_frame(
                     frame,
                     st.session_state.model,
@@ -896,11 +1023,21 @@ def main():
                     iou_threshold
                 )
                 
-                # Convert to PIL Image for display
-                if isinstance(annotated_frame, np.ndarray):
-                    annotated_rgb = Image.fromarray(annotated_frame.astype('uint8'))
+                if annotated_frame is None:
+                    st.error("❌ Gagal memproses frame")
+                    return
+                
+                # Convert to RGB for PIL/display (manual swap to avoid cv2 scope issue)
+                if len(annotated_frame.shape) == 3 and annotated_frame.shape[2] == 3:
+                    display_frame = annotated_frame[:, :, ::-1].copy()
                 else:
-                    annotated_rgb = annotated_frame
+                    display_frame = annotated_frame
+                
+                # Convert to PIL Image for display
+                if isinstance(display_frame, np.ndarray):
+                    annotated_rgb = Image.fromarray(display_frame.astype('uint8'))
+                else:
+                    annotated_rgb = display_frame
                 
                 st.image(annotated_rgb, use_column_width=True)
                 
@@ -913,6 +1050,8 @@ def main():
             
             except Exception as e:
                 st.error(f"❌ Error loading frame {frame_number}: {str(e)}")
+                import traceback
+                st.write(traceback.format_exc())
             
             # Clean up temp file
             if os.path.exists(temp_video_path):
