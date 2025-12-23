@@ -10,6 +10,13 @@ import time
 import imageio
 import sys
 
+# Try to import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 # WebRTC for cloud webcam support
 try:
     from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
@@ -389,110 +396,189 @@ def main():
         st.subheader("🎥 Webcam Real-Time Detection (WebRTC)")
         
         if not WEBRTC_AVAILABLE:
-            st.error("❌ streamlit-webrtc tidak tersedia. Install dengan: pip install streamlit-webrtc")
+            st.error("❌ streamlit-webrtc tidak tersedia. Install dengan: pip install streamlit-webrtc aiortc av")
             return
         
         st.info("✅ WebRTC Webcam aktif - Bekerja di cloud dan lokal!")
+        
+        try:
+            from av import VideoFrame
+        except ImportError:
+            st.error("❌ av library tidak tersedia")
+            return
+        
+        # Create a video processor callback
+        class MotorcycleProcessor:
+            def __init__(self, model, conf, iou, frame_height, line_position):
+                self.model = model
+                self.conf = conf
+                self.iou = iou
+                self.frame_height = frame_height
+                self.line_position = int(frame_height * line_position)
+                self.tracker = MotorcycleTracker(frame_height, line_position)
+                self.frame_count = 0
+                self.prev_time = time.time()
+                self.fps = 0
+                
+            def recv(self, frame):
+                try:
+                    # Get frame as BGR (OpenCV format)
+                    img = frame.to_ndarray(format="bgr24")
+                    h, w = img.shape[:2]
+                    
+                    # Resize if needed (keep consistent ratio)
+                    target_width = 640
+                    if w != target_width:
+                        scale = target_width / w
+                        new_w = target_width
+                        new_h = int(h * scale)
+                        # Convert BGR to RGB for PIL
+                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if CV2_AVAILABLE else img
+                        img_pil = Image.fromarray(img_rgb)
+                        img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        img = np.array(img_pil)
+                        # Convert back to BGR for YOLO
+                        if not isinstance(img, np.ndarray) or len(img.shape) != 3:
+                            img = np.array(img)
+                        h, w = img.shape[:2]
+                    
+                    # Process frame (YOLO expects BGR)
+                    try:
+                        annotated_frame, detections = process_frame(img, self.model, self.conf, self.iou)
+                    except Exception as e:
+                        print(f"Detection error: {str(e)}")
+                        annotated_frame = img.copy()
+                        detections = []
+                    
+                    # Update tracker dan hitung motorcycles
+                    if detections:
+                        track_info = self.tracker.update(detections)
+                    else:
+                        track_info = self.tracker.update([])
+                    
+                    # Draw counting line
+                    try:
+                        annotated_frame = self.tracker.draw_line(annotated_frame)
+                    except Exception as e:
+                        print(f"Draw line error: {str(e)}")
+                    
+                    # Calculate FPS
+                    self.frame_count += 1
+                    current_time = time.time()
+                    if (current_time - self.prev_time) >= 1.0:
+                        self.fps = self.frame_count / (current_time - self.prev_time)
+                        self.frame_count = 0
+                        self.prev_time = current_time
+                    
+                    # Add info text using OpenCV (more reliable)
+                    if CV2_AVAILABLE and isinstance(annotated_frame, np.ndarray):
+                        try:
+                            cv2.putText(annotated_frame, f"FPS: {self.fps:.1f}", (10, 30), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                            cv2.putText(annotated_frame, f"Current: {track_info['current_detections']}", (10, 70),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            cv2.putText(annotated_frame, f"Total: {track_info['count']}", (10, 110),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
+                        except Exception as e:
+                            print(f"Text overlay error: {str(e)}")
+                    else:
+                        # Fallback: use PIL
+                        try:
+                            if isinstance(annotated_frame, np.ndarray):
+                                frame_pil = Image.fromarray(annotated_frame.astype('uint8'))
+                            else:
+                                frame_pil = annotated_frame
+                            
+                            draw = ImageDraw.Draw(frame_pil)
+                            try:
+                                font = ImageFont.load_default()
+                            except:
+                                font = None
+                            
+                            draw.text((10, 10), f"FPS: {self.fps:.1f}", fill=(0, 255, 0), font=font)
+                            draw.text((10, 30), f"Current: {track_info['current_detections']}", fill=(255, 0, 0), font=font)
+                            draw.text((10, 50), f"Total: {track_info['count']}", fill=(0, 165, 255), font=font)
+                            
+                            annotated_frame = np.array(frame_pil)
+                        except Exception as e:
+                            print(f"PIL text error: {str(e)}")
+                    
+                    # Ensure frame is uint8 and BGR for output
+                    if isinstance(annotated_frame, np.ndarray):
+                        annotated_frame = annotated_frame.astype(np.uint8)
+                    
+                    # Store info di session state untuk ditampilkan di sidebar
+                    st.session_state.webrtc_fps = self.fps
+                    st.session_state.webrtc_current_det = track_info['current_detections']
+                    st.session_state.webrtc_total_count = track_info['count']
+                    st.session_state.webrtc_active_tracks = track_info['active_tracks']
+                    
+                    # Return as VideoFrame
+                    return VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+                
+                except Exception as e:
+                    print(f"WebRTC recv error: {str(e)}")
+                    # Return original frame on error
+                    return frame
         
         # WebRTC configuration
         rtc_configuration = RTCConfiguration(
             {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
         )
         
-        col1, col2 = st.columns([3, 1])
+        # Initialize session state untuk WebRTC stats
+        if "webrtc_fps" not in st.session_state:
+            st.session_state.webrtc_fps = 0
+        if "webrtc_current_det" not in st.session_state:
+            st.session_state.webrtc_current_det = 0
+        if "webrtc_total_count" not in st.session_state:
+            st.session_state.webrtc_total_count = 0
+        if "webrtc_active_tracks" not in st.session_state:
+            st.session_state.webrtc_active_tracks = 0
         
+        # Get frame height untuk tracker (default 480)
+        frame_height = 480
+        
+        # Extract model to local variable (avoid session_state access in thread)
+        model = st.session_state.model
+        conf = conf_threshold
+        iou = iou_threshold
+        line_pos = line_position
+        
+        # Reset Count button
+        col1, col2 = st.columns([1, 3])
         with col1:
-            webrtc_ctx = webrtc_streamer(
-                key="motorcycle-detection-webrtc",
-                mode=WebRtcMode.SENDRECV,
-                rtc_configuration=rtc_configuration,
-                media_stream_constraints={"video": True, "audio": False},
-                async_processing=True,
-                desired_playing_state=True
-            )
-            
-            frame_placeholder = st.empty()
-            status_placeholder = st.empty()
+            if st.button("🔄 Reset Count", key="webrtc_reset"):
+                st.session_state.webrtc_total_count = 0
+                st.session_state.webrtc_current_det = 0
+        
+        st.markdown("---")
+        
+        # Create streamer - Auto start
+        webrtc_ctx = webrtc_streamer(
+            key="motorcycle-detection-webrtc",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=rtc_configuration,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=False,
+            video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou, frame_height, line_pos),
+            desired_playing_state=True  # Auto-start, user can click STOP button
+        )
+        
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            st.markdown("### 📊 Status")
+            if webrtc_ctx.state.playing:
+                st.success("✅ Webcam aktif - Detection & Counting sedang berjalan")
+            else:
+                st.info("⏸️ Webcam dihentikan - Klik START untuk melanjutkan")
         
         with col2:
             st.markdown("### 📈 Statistics")
-            total_count_placeholder = st.empty()
-            current_det_placeholder = st.empty()
-            fps_placeholder = st.empty()
-            conf_display = st.empty()
-        
-        # Reset button
-        if st.button("🔄 Reset Count", key="webrtc_reset"):
-            st.session_state.tracker = None
-            st.session_state.motorcycle_count = 0
-        
-        # Get frame height untuk tracker
-        frame_height = 480
-        if st.session_state.tracker is None:
-            st.session_state.tracker = MotorcycleTracker(frame_height, line_position)
-        
-        # Process WebRTC frames
-        if webrtc_ctx.state.playing:
-            frame_count = 0
-            prev_time = time.time()
-            fps = 0
-            
-            while webrtc_ctx.state.playing:
-                try:
-                    # Get frame from WebRTC
-                    if webrtc_ctx.video_processor:
-                        frame = webrtc_ctx.video_processor.recv()
-                        if frame is None:
-                            continue
-                        
-                        # Convert to numpy array
-                        frame_np = frame.to_ndarray(format="bgr24")
-                        
-                        # Process frame
-                        annotated_frame, detections, track_info = process_frame_with_tracking(
-                            frame_np,
-                            st.session_state.model,
-                            st.session_state.tracker,
-                            conf_threshold,
-                            iou_threshold,
-                            line_position
-                        )
-                        
-                        # Calculate FPS
-                        frame_count += 1
-                        current_time = time.time()
-                        if (current_time - prev_time) >= 1.0:
-                            fps = frame_count / (current_time - prev_time)
-                            frame_count = 0
-                            prev_time = current_time
-                        
-                        # Add info to frame using PIL
-                        frame_pil = Image.fromarray(annotated_frame.astype('uint8')) if isinstance(annotated_frame, np.ndarray) else annotated_frame
-                        draw = ImageDraw.Draw(frame_pil)
-                        try:
-                            font = ImageFont.load_default()
-                        except:
-                            font = None
-                        
-                        draw.text((10, 30), f"FPS: {fps:.1f}", fill=(0, 255, 0), font=font)
-                        draw.text((10, 70), f"Current: {len(detections) if detections else 0}", fill=(255, 0, 0), font=font)
-                        draw.text((10, 110), f"Total Passed: {track_info['count']}", fill=(0, 165, 255), font=font)
-                        annotated_frame = np.array(frame_pil)
-                        
-                        # Display frame
-                        frame_placeholder.image(annotated_frame, use_column_width=True, channels="BGR")
-                        
-                        # Update stats
-                        status_placeholder.success(f"✅ Running... | Tracking {track_info['active_tracks']} motorcycles")
-                        total_count_placeholder.metric("🏆 Total Motorcycles Passed", track_info['count'])
-                        current_det_placeholder.metric("📍 Current in Frame", len(detections) if detections else 0)
-                        fps_placeholder.metric("⚡ FPS", f"{fps:.1f}")
-                        conf_display.metric("🎯 Confidence", f"{conf_threshold:.2f}")
-                except Exception as e:
-                    status_placeholder.error(f"❌ Error: {str(e)}")
-                    time.sleep(0.1)
-        else:
-            st.info("👆 Klik 'Start' untuk memulai WebRTC webcam")
+            st.metric("🏆 Total Count", st.session_state.webrtc_total_count)
+            st.metric("📍 Current", st.session_state.webrtc_current_det)
+            st.metric("⚡ FPS", f"{st.session_state.webrtc_fps:.1f}")
+            st.metric("🔍 Tracking", st.session_state.webrtc_active_tracks)
     
     # Local Webcam (Lokal saja)
     elif detection_mode == "📹 Webcam (Local)":
@@ -545,6 +631,7 @@ def main():
                 try:
                     import cv2
                     cap = cv2.VideoCapture(0)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get latest frame
                     
                     if not cap.isOpened():
                         st.error("❌ Webcam tidak tersedia. \n\nCatatan: Webcam hanya bekerja di lokal, tidak tersedia di Streamlit Cloud.")
@@ -552,10 +639,14 @@ def main():
                         st.session_state.running = False
                         return
                     
-                    # Set camera properties
+                    # Set camera properties untuk mencegah auto-zoom
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     cap.set(cv2.CAP_PROP_FPS, 30)
+                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable auto-focus
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)  # Disable auto-exposure
+                    cap.set(cv2.CAP_PROP_EXPOSURE, -8)  # Manual exposure (lebih terang)
+                    cap.set(cv2.CAP_PROP_ZOOM, 0)  # No zoom (reset ke default)
                 except ImportError:
                     st.error("❌ OpenCV (cv2) tidak tersedia. Instalasi dengan: pip install opencv-python")
                     st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
@@ -567,9 +658,13 @@ def main():
                 st.session_state.running = False
                 return
             
-            # Get frame dimensions untuk tracker
-            _, test_frame = cap.read()
-            frame_height = test_frame.shape[0] if test_frame is not None else 480
+            # Get frame dimensions untuk tracker (dengan timeout)
+            frame_height = 480
+            for _ in range(5):  # Try 5 times
+                ret, test_frame = cap.read()
+                if ret:
+                    frame_height = test_frame.shape[0]
+                    break
             
             # Initialize tracker jika belum
             if st.session_state.tracker is None:
@@ -578,17 +673,20 @@ def main():
             frame_count = 0
             prev_time = time.time()
             fps = 0
+            max_frames = 500  # Process max 500 frames before Streamlit reruns
             
             try:
-                while st.session_state.running:
+                status_placeholder.success("✅ Webcam aktif - Loading frames...")
+                
+                for frame_idx in range(max_frames):
+                    if not st.session_state.running:
+                        break
+                    
                     ret, frame = cap.read()
                     
                     if not ret:
                         status_placeholder.error("❌ Gagal membaca frame dari webcam")
                         break
-                    
-                    # Flip frame for mirror effect
-                    frame = np.fliplr(frame)
                     
                     # Process frame
                     annotated_frame, detections = process_frame(
@@ -648,11 +746,18 @@ def main():
                     current_det_placeholder.metric("📍 Current in Frame", current_detections)
                     fps_placeholder.metric("⚡ FPS", f"{fps:.1f}")
                     conf_display.metric("🎯 Confidence", f"{conf_threshold:.2f}")
+                    
+                    # Allow Streamlit to process button clicks
+                    time.sleep(0.01)
+                
+                cap.release()
             
             except Exception as e:
                 st.error(f"❌ Error saat menggunakan webcam: {str(e)}")
                 st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
                 st.session_state.running = False
+                if 'cap' in locals():
+                    cap.release()
         else:
             frame_placeholder.info("👆 Klik tombol '🟢 Start Camera' untuk memulai deteksi dan counting")
 
