@@ -443,6 +443,11 @@ def main():
             {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
         )
         
+        # Extract model to local variable (avoid session_state access in thread)
+        model = st.session_state.model
+        conf = conf_threshold
+        iou = iou_threshold
+        
         # Create streamer
         webrtc_ctx = webrtc_streamer(
             key="motorcycle-detection-webrtc",
@@ -450,11 +455,7 @@ def main():
             rtc_configuration=rtc_configuration,
             media_stream_constraints={"video": True, "audio": False},
             async_processing=False,
-            video_processor_factory=lambda: MotorcycleProcessor(
-                st.session_state.model,
-                conf_threshold,
-                iou_threshold
-            ),
+            video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou),
             desired_playing_state=True
         )
         
