@@ -368,18 +368,25 @@ def main():
         
         if st.session_state.running:
             try:
-                cap = cv2.VideoCapture(0)
-                
-                if not cap.isOpened():
-                    st.error("❌ Webcam tidak tersedia. \n\nCatatan: Webcam hanya bekerja di lokal, tidak tersedia di Streamlit Cloud.")
-                    st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk testing di Streamlit Cloud")
+                try:
+                    import cv2
+                    cap = cv2.VideoCapture(0)
+                    
+                    if not cap.isOpened():
+                        st.error("❌ Webcam tidak tersedia. \n\nCatatan: Webcam hanya bekerja di lokal, tidak tersedia di Streamlit Cloud.")
+                        st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk testing di Streamlit Cloud")
+                        st.session_state.running = False
+                        return
+                    
+                    # Set camera properties
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                except ImportError:
+                    st.error("❌ OpenCV (cv2) tidak tersedia. Instalasi dengan: pip install opencv-python")
+                    st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
                     st.session_state.running = False
                     return
-                
-                # Set camera properties
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                cap.set(cv2.CAP_PROP_FPS, 30)
             except Exception as e:
                 st.error(f"❌ Error saat mengakses webcam: {str(e)}")
                 st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
@@ -451,8 +458,12 @@ def main():
                     draw.text((10, 110), f"Total Passed: {total_motorcycles}", fill=(0, 165, 255), font=font)
                     annotated_frame = np.array(frame_pil)
                     
-                    # Convert BGR to RGB
-                    annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+                    # Convert frame to RGB using PIL if needed
+                    if isinstance(annotated_frame, np.ndarray):
+                        annotated_frame_pil = Image.fromarray(annotated_frame.astype('uint8'))
+                        annotated_frame_rgb = np.array(annotated_frame_pil)
+                    else:
+                        annotated_frame_rgb = annotated_frame
                     
                     # Display frame
                     frame_placeholder.image(annotated_frame_rgb, use_column_width=True)
@@ -577,7 +588,12 @@ def main():
                     iou_threshold
                 )
                 
-                st.image(annotated_frametColor(annotated_frame, cv2.COLOR_BGR2RGB))
+                # Convert to PIL Image for display
+                if isinstance(annotated_frame, np.ndarray):
+                    annotated_rgb = Image.fromarray(annotated_frame.astype('uint8'))
+                else:
+                    annotated_rgb = annotated_frame
+                
                 st.image(annotated_rgb, use_column_width=True)
                 
                 # Show metrics
