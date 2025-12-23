@@ -643,10 +643,32 @@ def main():
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     cap.set(cv2.CAP_PROP_FPS, 30)
-                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable auto-focus
-                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)  # Disable auto-exposure
+                    
+                    # Disable auto-focus (multiple attempts untuk berbagai kamera)
+                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+                    cap.set(28, 0)  # CAP_PROP_AUTOFOCUS alternative
+                    cap.set(38, 0)  # CAP_PROP_AUTO_FOCUS alternative
+                    
+                    # Disable auto-exposure (aggressive)
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)  # Auto-exposure off
                     cap.set(cv2.CAP_PROP_EXPOSURE, -8)  # Manual exposure (lebih terang)
-                    cap.set(cv2.CAP_PROP_ZOOM, 0)  # No zoom (reset ke default)
+                    cap.set(15, -8)  # CAP_PROP_EXPOSURE alternative
+                    
+                    # Disable zoom dan stabilisasi
+                    cap.set(cv2.CAP_PROP_ZOOM, 0)  # No zoom
+                    cap.set(27, 0)  # Disable stabilization
+                    cap.set(cv2.CAP_PROP_FOCUS_MODE, 0)  # Manual focus mode
+                    
+                    # Set fixed focus distance (default jauh)
+                    cap.set(39, 0)  # CAP_PROP_FOCUS_ABSOLUTE = 0 (far)
+                    
+                    # Lock brightness dan saturation
+                    cap.set(cv2.CAP_PROP_BRIGHTNESS, 100)
+                    cap.set(cv2.CAP_PROP_CONTRAST, 50)
+                    cap.set(cv2.CAP_PROP_SATURATION, 50)
+                    
+                    # Additional stabilization disable
+                    cap.set(cv2.CAP_PROP_WHITE_BALANCE_BLUE_U, -1)  # Auto white balance off
                 except ImportError:
                     st.error("❌ OpenCV (cv2) tidak tersedia. Instalasi dengan: pip install opencv-python")
                     st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
