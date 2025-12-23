@@ -4,3 +4,6 @@ libxrender-dev
 libgomp1
 libc6
 libglib2.0-0
+libgl1-mesa-glx
+libxkbcommon0
+libdbus-1-3
