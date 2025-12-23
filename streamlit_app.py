@@ -628,6 +628,7 @@ def main():
                 try:
                     import cv2
                     cap = cv2.VideoCapture(0)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get latest frame
                     
                     if not cap.isOpened():
                         st.error("❌ Webcam tidak tersedia. \n\nCatatan: Webcam hanya bekerja di lokal, tidak tersedia di Streamlit Cloud.")
@@ -654,9 +655,13 @@ def main():
                 st.session_state.running = False
                 return
             
-            # Get frame dimensions untuk tracker
-            _, test_frame = cap.read()
-            frame_height = test_frame.shape[0] if test_frame is not None else 480
+            # Get frame dimensions untuk tracker (dengan timeout)
+            frame_height = 480
+            for _ in range(5):  # Try 5 times
+                ret, test_frame = cap.read()
+                if ret:
+                    frame_height = test_frame.shape[0]
+                    break
             
             # Initialize tracker jika belum
             if st.session_state.tracker is None:
@@ -665,9 +670,15 @@ def main():
             frame_count = 0
             prev_time = time.time()
             fps = 0
+            max_frames = 500  # Process max 500 frames before Streamlit reruns
             
             try:
-                while st.session_state.running:
+                status_placeholder.success("✅ Webcam aktif - Loading frames...")
+                
+                for frame_idx in range(max_frames):
+                    if not st.session_state.running:
+                        break
+                    
                     ret, frame = cap.read()
                     
                     if not ret:
@@ -732,11 +743,18 @@ def main():
                     current_det_placeholder.metric("📍 Current in Frame", current_detections)
                     fps_placeholder.metric("⚡ FPS", f"{fps:.1f}")
                     conf_display.metric("🎯 Confidence", f"{conf_threshold:.2f}")
+                    
+                    # Allow Streamlit to process button clicks
+                    time.sleep(0.01)
+                
+                cap.release()
             
             except Exception as e:
                 st.error(f"❌ Error saat menggunakan webcam: {str(e)}")
                 st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
                 st.session_state.running = False
+                if 'cap' in locals():
+                    cap.release()
         else:
             frame_placeholder.info("👆 Klik tombol '🟢 Start Camera' untuk memulai deteksi dan counting")
 
