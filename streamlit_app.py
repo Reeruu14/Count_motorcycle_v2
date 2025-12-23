@@ -10,6 +10,13 @@ import time
 import imageio
 import sys
 
+# WebRTC for cloud webcam support
+try:
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 # ==================== ENVIRONMENT DETECTION ====================
 def is_cloud_environment():
     """Detect if running on Streamlit Cloud or local"""
@@ -274,16 +281,24 @@ with st.sidebar:
     # Adjust available modes based on environment
     if IS_CLOUD:
         st.subheader("📋 Detection Mode")
-        st.info("☁️ Running on Streamlit Cloud - Webcam disabled for security")
-        detection_mode = st.radio(
-            "Choose Mode:",
-            ["🖼️ Upload Image", "🎥 Upload Video"],
-            help="Pilih sumber input untuk deteksi"
-        )
+        if WEBRTC_AVAILABLE:
+            st.info("☁️ Running on Streamlit Cloud - WebRTC Webcam Enabled")
+            detection_mode = st.radio(
+                "Choose Mode:",
+                ["📹 Webcam (WebRTC)", "🖼️ Upload Image", "🎥 Upload Video"],
+                help="Pilih sumber input untuk deteksi"
+            )
+        else:
+            st.warning("⚠️ WebRTC tidak tersedia - gunakan Upload Image/Video")
+            detection_mode = st.radio(
+                "Choose Mode:",
+                ["🖼️ Upload Image", "🎥 Upload Video"],
+                help="Pilih sumber input untuk deteksi"
+            )
     else:
         detection_mode = st.radio(
             "Detection Mode:",
-            ["📹 Webcam (with Counting)", "🖼️ Upload Image", "🎥 Upload Video"],
+            ["📹 Webcam (Local)", "📹 Webcam (WebRTC)", "🖼️ Upload Image", "🎥 Upload Video"],
             help="Pilih sumber input untuk deteksi"
         )
     
