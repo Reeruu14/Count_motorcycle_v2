@@ -212,7 +212,7 @@ with st.sidebar:
     
     # Model selection
     model_options = {
-        "Best Model (Recommended)": "models/motorcycle_detector_best.pt",
+        "Best Model (Recommended)": "motorcycle_detector_best.pt",
         "YOLOv8 Nano": "yolov8n.pt",
         "YOLOv8 Small": "yolov8s.pt",
         "YOLOv8 Medium": "yolov8m.pt"
