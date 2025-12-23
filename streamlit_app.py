@@ -253,9 +253,22 @@ with st.sidebar:
     # Confidence threshold
     conf_threshold = st.slider(
         "Confidence Threshold:",
-        min_value=0.05,
+        min_value=0.1,
         max_value=0.95,
-        value=0.35
+        value=0.5,
+        step=0.05,
+        help="Semakin tinggi = semakin strict dalam deteksi"
+    )
+    
+    # IOU threshold
+    iou_threshold = st.slider(
+        "IOU Threshold:",
+        min_value=0.1,
+        max_value=0.9,
+        value=0.5,
+        step=0.05,
+        help="Threshold untuk NMS (Non-Maximum Suppression)"
+    )
     
     # Counting line position
     st.markdown("---")
