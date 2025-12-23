@@ -862,25 +862,32 @@ def main():
             try:
                 video_data = imageio.get_reader(temp_video_path)
                 fps = int(video_data.get_meta_data().get('fps', 30))
+                
+                # Get total frames without loading all (more efficient)
+                try:
+                    total_frames = video_data.get_length()
+                except:
+                    # Fallback: estimate or load with limit
+                    st.warning("⚠️ Tidak bisa mendapat jumlah frame pasti, loading frame preview...")
+                    total_frames = 100  # Default estimate
             except Exception as e:
                 st.error(f"❌ Gagal membuka video: {str(e)}")
                 return
             
-            # Get video properties
-            frames = list(video_data)
-            total_frames = len(frames)
+            st.info(f"📊 FPS: {fps} | Est. Total Frames: {total_frames if total_frames != 100 else '?'}")
             
-            st.info(f"📊 Total Frames: {total_frames} | FPS: {fps}")
-            
-            # Frame slider
+            # Frame slider (load on-demand)
             frame_number = st.slider("Select frame:", 0, total_frames - 1, 0)
             
-            if 0 <= frame_number < len(frames):
-                frame = frames[frame_number]
+            try:
+                # Load only the selected frame (not all frames!)
+                video_data.set_image_index(frame_number)
+                frame = video_data.get_data(frame_number)
                 
                 # Ensure frame is numpy array
                 if not isinstance(frame, np.ndarray):
                     frame = np.array(frame)
+                
                 # Process frame
                 annotated_frame, detections = process_frame(
                     frame,
@@ -903,6 +910,9 @@ def main():
                     st.metric("🏍️ Motorcycles in Frame", len(detections))
                 with col2:
                     st.metric("Frame Number", f"{frame_number} / {total_frames}")
+            
+            except Exception as e:
+                st.error(f"❌ Error loading frame {frame_number}: {str(e)}")
             
             # Clean up temp file
             if os.path.exists(temp_video_path):
