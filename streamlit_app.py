@@ -409,16 +409,22 @@ def main():
         
         # Create a video processor callback
         class MotorcycleProcessor:
-            def __init__(self, model, conf, iou):
+            def __init__(self, model, conf, iou, frame_height, line_position):
                 self.model = model
                 self.conf = conf
                 self.iou = iou
+                self.frame_height = frame_height
+                self.line_position = int(frame_height * line_position)
+                self.tracker = MotorcycleTracker(frame_height, line_position)
+                self.frame_count = 0
+                self.prev_time = time.time()
+                self.fps = 0
                 
             def recv(self, frame):
                 img = frame.to_ndarray(format="bgr24")
+                h, w = img.shape[:2]
                 
                 # Resize untuk performance (using PIL instead of cv2)
-                h, w = img.shape[:2]
                 if w > 640:
                     scale = 640 / w
                     new_w = 640
@@ -426,6 +432,7 @@ def main():
                     img_pil = Image.fromarray(img)
                     img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
                     img = np.array(img_pil)
+                    h, w = img.shape[:2]
                 
                 # Process frame
                 try:
@@ -435,6 +442,44 @@ def main():
                     annotated_frame = img
                     detections = []
                 
+                # Update tracker dan hitung motorcycles
+                if detections:
+                    track_info = self.tracker.update(detections)
+                else:
+                    track_info = self.tracker.update([])
+                
+                # Draw counting line
+                annotated_frame = self.tracker.draw_line(annotated_frame)
+                
+                # Calculate FPS
+                self.frame_count += 1
+                current_time = time.time()
+                if (current_time - self.prev_time) >= 1.0:
+                    self.fps = self.frame_count / (current_time - self.prev_time)
+                    self.frame_count = 0
+                    self.prev_time = current_time
+                
+                # Add info text menggunakan PIL
+                frame_pil = Image.fromarray(annotated_frame.astype('uint8'))
+                draw = ImageDraw.Draw(frame_pil)
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                
+                # Draw text on frame
+                draw.text((10, 10), f"FPS: {self.fps:.1f}", fill=(0, 255, 0), font=font)
+                draw.text((10, 30), f"Current: {track_info['current_detections']}", fill=(255, 0, 0), font=font)
+                draw.text((10, 50), f"Total Passed: {track_info['count']}", fill=(0, 165, 255), font=font)
+                
+                annotated_frame = np.array(frame_pil)
+                
+                # Store info di session state untuk ditampilkan di sidebar
+                st.session_state.webrtc_fps = self.fps
+                st.session_state.webrtc_current_det = track_info['current_detections']
+                st.session_state.webrtc_total_count = track_info['count']
+                st.session_state.webrtc_active_tracks = track_info['active_tracks']
+                
                 # Return as VideoFrame
                 return VideoFrame.from_ndarray(annotated_frame, format="bgr24")
         
@@ -443,10 +488,24 @@ def main():
             {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
         )
         
+        # Initialize session state untuk WebRTC stats
+        if "webrtc_fps" not in st.session_state:
+            st.session_state.webrtc_fps = 0
+        if "webrtc_current_det" not in st.session_state:
+            st.session_state.webrtc_current_det = 0
+        if "webrtc_total_count" not in st.session_state:
+            st.session_state.webrtc_total_count = 0
+        if "webrtc_active_tracks" not in st.session_state:
+            st.session_state.webrtc_active_tracks = 0
+        
+        # Get frame height untuk tracker (default 480)
+        frame_height = 480
+        
         # Extract model to local variable (avoid session_state access in thread)
         model = st.session_state.model
         conf = conf_threshold
         iou = iou_threshold
+        line_pos = line_position
         
         # Create streamer
         webrtc_ctx = webrtc_streamer(
@@ -455,7 +514,7 @@ def main():
             rtc_configuration=rtc_configuration,
             media_stream_constraints={"video": True, "audio": False},
             async_processing=False,
-            video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou),
+            video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou, frame_height, line_pos),
             desired_playing_state=True
         )
         
@@ -463,14 +522,22 @@ def main():
         with col1:
             st.markdown("### 📊 Status")
             if webrtc_ctx.state.playing:
-                st.success("✅ Webcam aktif - Detection sedang berjalan")
+                st.success("✅ Webcam aktif - Detection & Counting sedang berjalan")
             else:
                 st.info("👆 Klik tombol START untuk aktifkan webcam")
         
         with col2:
-            if st.button("🔄 Reset Count"):
-                st.session_state.tracker = None
-                st.rerun()
+            st.markdown("### 📈 Statistics")
+            st.metric("🏆 Total Count", st.session_state.webrtc_total_count)
+            st.metric("📍 Current", st.session_state.webrtc_current_det)
+            st.metric("⚡ FPS", f"{st.session_state.webrtc_fps:.1f}")
+            st.metric("🔍 Tracking", st.session_state.webrtc_active_tracks)
+        
+        # Reset button
+        if st.button("🔄 Reset Count", key="webrtc_reset"):
+            st.session_state.webrtc_total_count = 0
+            st.session_state.webrtc_current_det = 0
+            st.rerun()
     
     # Local Webcam (Lokal saja)
     elif detection_mode == "📹 Webcam (Local)":
