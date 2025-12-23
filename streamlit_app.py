@@ -1,13 +1,13 @@
 import streamlit as st
-import cv2
-import torch
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+import torch
 from ultralytics import YOLO
-from PIL import Image
 import os
 from collections import defaultdict
 from scipy.spatial import distance
 import time
+import imageio
 
 # ==================== MOTORCYCLE TRACKER ====================
 class MotorcycleTracker:
@@ -120,21 +120,40 @@ class MotorcycleTracker:
         }
     
     def draw_line(self, frame):
-        """Draw counting line di frame"""
-        h, w = frame.shape[:2]
-        color = (0, 255, 255)  # Cyan
+        """Draw counting line di frame using PIL"""
+        # Convert numpy array to PIL Image if needed
+        if isinstance(frame, np.ndarray):
+            frame_pil = Image.fromarray(frame)
+        else:
+            frame_pil = frame
+        
+        draw = ImageDraw.Draw(frame_pil)
+        h, w = frame_pil.size[1], frame_pil.size[0]
+        
+        color = (0, 255, 255)  # Cyan (RGB)
         thickness = 2
-        cv2.line(frame, (0, self.line_position), (w, self.line_position), color, thickness)
-        cv2.putText(
-            frame,
-            "Counting Line",
-            (10, self.line_position - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2
+        
+        # Draw line
+        draw.line(
+            [(0, self.line_position), (w, self.line_position)],
+            fill=color,
+            width=thickness
         )
-        return frame
+        
+        # Draw text
+        try:
+            font = ImageFont.load_default()
+        except:
+            font = None
+        
+        draw.text(
+            (10, self.line_position - 10),
+            "Counting Line",
+            fill=color,
+            font=font
+        )
+        
+        return np.array(frame_pil)
 
 # ==================== PAGE CONFIGURATION ====================
 
@@ -388,7 +407,7 @@ def main():
                         break
                     
                     # Flip frame for mirror effect
-                    frame = cv2.flip(frame, 1)
+                    frame = np.fliplr(frame)
                     
                     # Process frame
                     annotated_frame, detections = process_frame(
@@ -419,34 +438,18 @@ def main():
                         frame_count = 0
                         prev_time = current_time
                     
-                    # Add info to frame
-                    cv2.putText(
-                        annotated_frame,
-                        f"FPS: {fps:.1f}",
-                        (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (0, 255, 0),
-                        2
-                    )
-                    cv2.putText(
-                        annotated_frame,
-                        f"Current: {current_detections}",
-                        (10, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
-                        (255, 0, 0),
-                        2
-                    )
-                    cv2.putText(
-                        annotated_frame,
-                        f"Total Passed: {total_motorcycles}",
-                        (10, 110),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 165, 255),
-                        3
-                    )
+                    # Add info to frame using PIL
+                    frame_pil = Image.fromarray(annotated_frame.astype('uint8')) if isinstance(annotated_frame, np.ndarray) else annotated_frame
+                    draw = ImageDraw.Draw(frame_pil)
+                    try:
+                        font = ImageFont.load_default()
+                    except:
+                        font = None
+                    
+                    draw.text((10, 30), f"FPS: {fps:.1f}", fill=(0, 255, 0), font=font)
+                    draw.text((10, 70), f"Current: {current_detections}", fill=(255, 0, 0), font=font)
+                    draw.text((10, 110), f"Total Passed: {total_motorcycles}", fill=(0, 165, 255), font=font)
+                    annotated_frame = np.array(frame_pil)
                     
                     # Convert BGR to RGB
                     annotated_frame_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
@@ -464,11 +467,8 @@ def main():
             except Exception as e:
                 st.error(f"❌ Error saat menggunakan webcam: {str(e)}")
                 st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
-                st.session_state.running = False
-            finally:
-                cap.release()
-                st.session_state.running = False
-        else:
+                st.sesDisplay frame
+                    frame_placeholder.image(annotated_frame
             frame_placeholder.info("👆 Klik tombol '🟢 Start Camera' untuk memulai deteksi dan counting")
 
 
@@ -505,13 +505,8 @@ def main():
             
             with col1:
                 st.markdown("### Original Image")
-                st.image(image, use_column_width=True)
-            
-            with col2:
-                st.markdown("### Detection Result")
-                annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-                st.image(annotated_rgb, use_column_width=True)
-            
+              Process image
+            image_bgr = image_array
             # Show statistics
             st.markdown("---")
             col1, col2, col3 = st.columns(3)
@@ -533,8 +528,7 @@ def main():
             if detections:
                 st.markdown("### 📋 Detection Details")
                 for i, det in enumerate(detections, 1):
-                    st.write(f"**Detection {i}:** Confidence = {det['conf']:.2%}")
-
+                st.image(annotated_frame
 
     elif detection_mode == "🎥 Upload Video":
         st.subheader("🎥 Video Detection")
@@ -551,27 +545,29 @@ def main():
             with open(temp_video_path, "wb") as f:
                 f.write(uploaded_video.getbuffer())
             
-            # Open video
-            cap = cv2.VideoCapture(temp_video_path)
-            
-            if not cap.isOpened():
-                st.error("❌ Gagal membuka video")
+            # Open video with imageio
+            try:
+                video_data = imageio.get_reader(temp_video_path)
+                fps = int(video_data.get_meta_data().get('fps', 30))
+            except Exception as e:
+                st.error(f"❌ Gagal membuka video: {str(e)}")
                 return
             
             # Get video properties
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            frames = list(video_data)
+            total_frames = len(frames)
             
             st.info(f"📊 Total Frames: {total_frames} | FPS: {fps}")
             
             # Frame slider
             frame_number = st.slider("Select frame:", 0, total_frames - 1, 0)
             
-            # Go to frame
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-            ret, frame = cap.read()
-            
-            if ret:
+            if 0 <= frame_number < len(frames):
+                frame = frames[frame_number]
+                
+                # Ensure frame is numpy array
+                if not isinstance(frame, np.ndarray):
+                    frame = np.array(frame)
                 # Process frame
                 annotated_frame, detections = process_frame(
                     frame,
@@ -580,8 +576,7 @@ def main():
                     iou_threshold
                 )
                 
-                # Display
-                annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+                st.image(annotated_frametColor(annotated_frame, cv2.COLOR_BGR2RGB)
                 st.image(annotated_rgb, use_column_width=True)
                 
                 # Show metrics
@@ -590,8 +585,6 @@ def main():
                     st.metric("🏍️ Motorcycles in Frame", len(detections))
                 with col2:
                     st.metric("Frame Number", f"{frame_number} / {total_frames}")
-            
-            cap.release()
             
             # Clean up temp file
             if os.path.exists(temp_video_path):
