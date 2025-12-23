@@ -389,110 +389,81 @@ def main():
         st.subheader("🎥 Webcam Real-Time Detection (WebRTC)")
         
         if not WEBRTC_AVAILABLE:
-            st.error("❌ streamlit-webrtc tidak tersedia. Install dengan: pip install streamlit-webrtc")
+            st.error("❌ streamlit-webrtc tidak tersedia. Install dengan: pip install streamlit-webrtc aiortc av")
             return
         
         st.info("✅ WebRTC Webcam aktif - Bekerja di cloud dan lokal!")
+        
+        try:
+            from av import VideoFrame
+        except ImportError:
+            st.error("❌ av library tidak tersedia")
+            return
+        
+        # Create a video processor callback
+        class MotorcycleProcessor:
+            def __init__(self, model, tracker, conf, iou):
+                self.model = model
+                self.tracker = tracker
+                self.conf = conf
+                self.iou = iou
+                self.frame_count = 0
+                
+            def recv(self, frame):
+                img = frame.to_ndarray(format="bgr24")
+                
+                # Resize untuk performance
+                h, w = img.shape[:2]
+                if w > 640:
+                    scale = 640 / w
+                    new_w = 640
+                    new_h = int(h * scale)
+                    img = cv2.resize(img, (new_w, new_h))
+                
+                # Process frame
+                try:
+                    annotated_frame, detections = process_frame(img, self.model, self.conf, self.iou)
+                except Exception as e:
+                    st.warning(f"Detection error: {str(e)}")
+                    annotated_frame = img
+                    detections = []
+                
+                # Return as VideoFrame
+                return VideoFrame.from_ndarray(annotated_frame, format="bgr24")
         
         # WebRTC configuration
         rtc_configuration = RTCConfiguration(
             {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
         )
         
-        col1, col2 = st.columns([3, 1])
+        # Create streamer
+        webrtc_ctx = webrtc_streamer(
+            key="motorcycle-detection-webrtc",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=rtc_configuration,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=False,
+            video_processor_factory=lambda: MotorcycleProcessor(
+                st.session_state.model,
+                st.session_state.tracker if st.session_state.tracker else MotorcycleTracker(480, line_position),
+                conf_threshold,
+                iou_threshold
+            ),
+            desired_playing_state=True
+        )
         
+        col1, col2 = st.columns([2, 1])
         with col1:
-            webrtc_ctx = webrtc_streamer(
-                key="motorcycle-detection-webrtc",
-                mode=WebRtcMode.SENDRECV,
-                rtc_configuration=rtc_configuration,
-                media_stream_constraints={"video": True, "audio": False},
-                async_processing=True,
-                desired_playing_state=True
-            )
-            
-            frame_placeholder = st.empty()
-            status_placeholder = st.empty()
+            st.markdown("### 📊 Status")
+            if webrtc_ctx.state.playing:
+                st.success("✅ Webcam aktif - Detection sedang berjalan")
+            else:
+                st.info("👆 Klik tombol START untuk aktifkan webcam")
         
         with col2:
-            st.markdown("### 📈 Statistics")
-            total_count_placeholder = st.empty()
-            current_det_placeholder = st.empty()
-            fps_placeholder = st.empty()
-            conf_display = st.empty()
-        
-        # Reset button
-        if st.button("🔄 Reset Count", key="webrtc_reset"):
-            st.session_state.tracker = None
-            st.session_state.motorcycle_count = 0
-        
-        # Get frame height untuk tracker
-        frame_height = 480
-        if st.session_state.tracker is None:
-            st.session_state.tracker = MotorcycleTracker(frame_height, line_position)
-        
-        # Process WebRTC frames
-        if webrtc_ctx.state.playing:
-            frame_count = 0
-            prev_time = time.time()
-            fps = 0
-            
-            while webrtc_ctx.state.playing:
-                try:
-                    # Get frame from WebRTC
-                    if webrtc_ctx.video_processor:
-                        frame = webrtc_ctx.video_processor.recv()
-                        if frame is None:
-                            continue
-                        
-                        # Convert to numpy array
-                        frame_np = frame.to_ndarray(format="bgr24")
-                        
-                        # Process frame
-                        annotated_frame, detections, track_info = process_frame_with_tracking(
-                            frame_np,
-                            st.session_state.model,
-                            st.session_state.tracker,
-                            conf_threshold,
-                            iou_threshold,
-                            line_position
-                        )
-                        
-                        # Calculate FPS
-                        frame_count += 1
-                        current_time = time.time()
-                        if (current_time - prev_time) >= 1.0:
-                            fps = frame_count / (current_time - prev_time)
-                            frame_count = 0
-                            prev_time = current_time
-                        
-                        # Add info to frame using PIL
-                        frame_pil = Image.fromarray(annotated_frame.astype('uint8')) if isinstance(annotated_frame, np.ndarray) else annotated_frame
-                        draw = ImageDraw.Draw(frame_pil)
-                        try:
-                            font = ImageFont.load_default()
-                        except:
-                            font = None
-                        
-                        draw.text((10, 30), f"FPS: {fps:.1f}", fill=(0, 255, 0), font=font)
-                        draw.text((10, 70), f"Current: {len(detections) if detections else 0}", fill=(255, 0, 0), font=font)
-                        draw.text((10, 110), f"Total Passed: {track_info['count']}", fill=(0, 165, 255), font=font)
-                        annotated_frame = np.array(frame_pil)
-                        
-                        # Display frame
-                        frame_placeholder.image(annotated_frame, use_column_width=True, channels="BGR")
-                        
-                        # Update stats
-                        status_placeholder.success(f"✅ Running... | Tracking {track_info['active_tracks']} motorcycles")
-                        total_count_placeholder.metric("🏆 Total Motorcycles Passed", track_info['count'])
-                        current_det_placeholder.metric("📍 Current in Frame", len(detections) if detections else 0)
-                        fps_placeholder.metric("⚡ FPS", f"{fps:.1f}")
-                        conf_display.metric("🎯 Confidence", f"{conf_threshold:.2f}")
-                except Exception as e:
-                    status_placeholder.error(f"❌ Error: {str(e)}")
-                    time.sleep(0.1)
-        else:
-            st.info("👆 Klik 'Start' untuk memulai WebRTC webcam")
+            if st.button("🔄 Reset Count"):
+                st.session_state.tracker = None
+                st.rerun()
     
     # Local Webcam (Lokal saja)
     elif detection_mode == "📹 Webcam (Local)":
