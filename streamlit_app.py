@@ -10,6 +10,13 @@ import time
 import imageio
 import sys
 
+# Try to import cv2
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 # WebRTC for cloud webcam support
 try:
     from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
@@ -402,29 +409,29 @@ def main():
         
         # Create a video processor callback
         class MotorcycleProcessor:
-            def __init__(self, model, tracker, conf, iou):
+            def __init__(self, model, conf, iou):
                 self.model = model
-                self.tracker = tracker
                 self.conf = conf
                 self.iou = iou
-                self.frame_count = 0
                 
             def recv(self, frame):
                 img = frame.to_ndarray(format="bgr24")
                 
-                # Resize untuk performance
+                # Resize untuk performance (using PIL instead of cv2)
                 h, w = img.shape[:2]
                 if w > 640:
                     scale = 640 / w
                     new_w = 640
                     new_h = int(h * scale)
-                    img = cv2.resize(img, (new_w, new_h))
+                    img_pil = Image.fromarray(img)
+                    img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    img = np.array(img_pil)
                 
                 # Process frame
                 try:
                     annotated_frame, detections = process_frame(img, self.model, self.conf, self.iou)
                 except Exception as e:
-                    st.warning(f"Detection error: {str(e)}")
+                    print(f"Detection error: {str(e)}")
                     annotated_frame = img
                     detections = []
                 
@@ -445,7 +452,6 @@ def main():
             async_processing=False,
             video_processor_factory=lambda: MotorcycleProcessor(
                 st.session_state.model,
-                st.session_state.tracker if st.session_state.tracker else MotorcycleTracker(480, line_position),
                 conf_threshold,
                 iou_threshold
             ),
