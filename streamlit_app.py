@@ -332,6 +332,14 @@ def main():
     if detection_mode == "📹 Webcam (with Counting)":
         st.subheader("🎥 Webcam Real-Time Detection & Counting")
         
+        # Warning about webcam limitations
+        st.warning(
+            "⚠️ **Webcam hanya bekerja di lokal (localhost), tidak tersedia di Streamlit Cloud!**\n\n"
+            "Jika Anda menggunakan Streamlit Cloud atau deployment online, gunakan fitur:\n"
+            "- 📷 **Upload Image** untuk mendeteksi gambar statis\n"
+            "- 🎥 **Upload Video** untuk mendeteksi dari file video"
+        )
+        
         col1, col2 = st.columns([3, 1])
         
         with col1:
