@@ -424,10 +424,12 @@ def main():
                 img = frame.to_ndarray(format="bgr24")
                 h, w = img.shape[:2]
                 
-                # Resize untuk performance (using PIL instead of cv2)
-                if w > 640:
-                    scale = 640 / w
-                    new_w = 640
+                # Keep original resolution (no dynamic resizing)
+                # Jika perlu resize, lakukan with consistent ratio
+                target_width = 640
+                if w != target_width:
+                    scale = target_width / w
+                    new_w = target_width
                     new_h = int(h * scale)
                     img_pil = Image.fromarray(img)
                     img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -597,10 +599,14 @@ def main():
                         st.session_state.running = False
                         return
                     
-                    # Set camera properties
+                    # Set camera properties untuk mencegah auto-zoom
                     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                     cap.set(cv2.CAP_PROP_FPS, 30)
+                    cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable auto-focus
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0)  # Disable auto-exposure
+                    cap.set(cv2.CAP_PROP_EXPOSURE, -8)  # Manual exposure (lebih terang)
+                    cap.set(cv2.CAP_PROP_ZOOM, 0)  # No zoom (reset ke default)
                 except ImportError:
                     st.error("❌ OpenCV (cv2) tidak tersedia. Instalasi dengan: pip install opencv-python")
                     st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
@@ -631,9 +637,6 @@ def main():
                     if not ret:
                         status_placeholder.error("❌ Gagal membaca frame dari webcam")
                         break
-                    
-                    # Flip frame for mirror effect
-                    frame = np.fliplr(frame)
                     
                     # Process frame
                     annotated_frame, detections = process_frame(
