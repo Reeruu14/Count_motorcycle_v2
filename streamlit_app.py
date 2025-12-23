@@ -10,6 +10,13 @@ import time
 import imageio
 import sys
 
+# WebRTC for cloud webcam support
+try:
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 # ==================== ENVIRONMENT DETECTION ====================
 def is_cloud_environment():
     """Detect if running on Streamlit Cloud or local"""
@@ -274,16 +281,24 @@ with st.sidebar:
     # Adjust available modes based on environment
     if IS_CLOUD:
         st.subheader("📋 Detection Mode")
-        st.info("☁️ Running on Streamlit Cloud - Webcam disabled for security")
-        detection_mode = st.radio(
-            "Choose Mode:",
-            ["🖼️ Upload Image", "🎥 Upload Video"],
-            help="Pilih sumber input untuk deteksi"
-        )
+        if WEBRTC_AVAILABLE:
+            st.info("☁️ Running on Streamlit Cloud - WebRTC Webcam Enabled")
+            detection_mode = st.radio(
+                "Choose Mode:",
+                ["📹 Webcam (WebRTC)", "🖼️ Upload Image", "🎥 Upload Video"],
+                help="Pilih sumber input untuk deteksi"
+            )
+        else:
+            st.warning("⚠️ WebRTC tidak tersedia - gunakan Upload Image/Video")
+            detection_mode = st.radio(
+                "Choose Mode:",
+                ["🖼️ Upload Image", "🎥 Upload Video"],
+                help="Pilih sumber input untuk deteksi"
+            )
     else:
         detection_mode = st.radio(
             "Detection Mode:",
-            ["📹 Webcam (with Counting)", "🖼️ Upload Image", "🎥 Upload Video"],
+            ["📹 Webcam (Local)", "📹 Webcam (WebRTC)", "🖼️ Upload Image", "🎥 Upload Video"],
             help="Pilih sumber input untuk deteksi"
         )
     
@@ -312,6 +327,26 @@ def load_model(model_path):
     except Exception as e:
         st.error(f"❌ Error loading model: {str(e)}")
         return None
+
+
+def process_frame_with_tracking(frame, model, tracker, conf, iou, line_position):
+    """Process frame with detection and tracking"""
+    if frame is None:
+        return None, None, {}
+    
+    # Process frame for detection
+    annotated_frame, detections = process_frame(frame, model, conf, iou)
+    
+    # Update tracker
+    if detections:
+        track_info = tracker.update(detections)
+    else:
+        track_info = tracker.update([])
+    
+    # Draw counting line
+    annotated_frame = tracker.draw_line(annotated_frame)
+    
+    return annotated_frame, detections, track_info
 
 
 def process_frame(frame, model, conf, iou):
@@ -348,13 +383,125 @@ def main():
         return
     
     # Main content based on selected mode
-    if detection_mode == "📹 Webcam (with Counting)" and not IS_CLOUD:
-        st.subheader("🎥 Webcam Real-Time Detection & Counting")
+    
+    # WebRTC Webcam (Cloud & Local)
+    if detection_mode == "📹 Webcam (WebRTC)":
+        st.subheader("🎥 Webcam Real-Time Detection (WebRTC)")
+        
+        if not WEBRTC_AVAILABLE:
+            st.error("❌ streamlit-webrtc tidak tersedia. Install dengan: pip install streamlit-webrtc")
+            return
+        
+        st.info("✅ WebRTC Webcam aktif - Bekerja di cloud dan lokal!")
+        
+        # WebRTC configuration
+        rtc_configuration = RTCConfiguration(
+            {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        )
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            webrtc_ctx = webrtc_streamer(
+                key="motorcycle-detection-webrtc",
+                mode=WebRtcMode.SENDRECV,
+                rtc_configuration=rtc_configuration,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True,
+                desired_playing_state=True
+            )
+            
+            frame_placeholder = st.empty()
+            status_placeholder = st.empty()
+        
+        with col2:
+            st.markdown("### 📈 Statistics")
+            total_count_placeholder = st.empty()
+            current_det_placeholder = st.empty()
+            fps_placeholder = st.empty()
+            conf_display = st.empty()
+        
+        # Reset button
+        if st.button("🔄 Reset Count", key="webrtc_reset"):
+            st.session_state.tracker = None
+            st.session_state.motorcycle_count = 0
+        
+        # Get frame height untuk tracker
+        frame_height = 480
+        if st.session_state.tracker is None:
+            st.session_state.tracker = MotorcycleTracker(frame_height, line_position)
+        
+        # Process WebRTC frames
+        if webrtc_ctx.state.playing:
+            frame_count = 0
+            prev_time = time.time()
+            fps = 0
+            
+            while webrtc_ctx.state.playing:
+                try:
+                    # Get frame from WebRTC
+                    if webrtc_ctx.video_processor:
+                        frame = webrtc_ctx.video_processor.recv()
+                        if frame is None:
+                            continue
+                        
+                        # Convert to numpy array
+                        frame_np = frame.to_ndarray(format="bgr24")
+                        
+                        # Process frame
+                        annotated_frame, detections, track_info = process_frame_with_tracking(
+                            frame_np,
+                            st.session_state.model,
+                            st.session_state.tracker,
+                            conf_threshold,
+                            iou_threshold,
+                            line_position
+                        )
+                        
+                        # Calculate FPS
+                        frame_count += 1
+                        current_time = time.time()
+                        if (current_time - prev_time) >= 1.0:
+                            fps = frame_count / (current_time - prev_time)
+                            frame_count = 0
+                            prev_time = current_time
+                        
+                        # Add info to frame using PIL
+                        frame_pil = Image.fromarray(annotated_frame.astype('uint8')) if isinstance(annotated_frame, np.ndarray) else annotated_frame
+                        draw = ImageDraw.Draw(frame_pil)
+                        try:
+                            font = ImageFont.load_default()
+                        except:
+                            font = None
+                        
+                        draw.text((10, 30), f"FPS: {fps:.1f}", fill=(0, 255, 0), font=font)
+                        draw.text((10, 70), f"Current: {len(detections) if detections else 0}", fill=(255, 0, 0), font=font)
+                        draw.text((10, 110), f"Total Passed: {track_info['count']}", fill=(0, 165, 255), font=font)
+                        annotated_frame = np.array(frame_pil)
+                        
+                        # Display frame
+                        frame_placeholder.image(annotated_frame, use_column_width=True, channels="BGR")
+                        
+                        # Update stats
+                        status_placeholder.success(f"✅ Running... | Tracking {track_info['active_tracks']} motorcycles")
+                        total_count_placeholder.metric("🏆 Total Motorcycles Passed", track_info['count'])
+                        current_det_placeholder.metric("📍 Current in Frame", len(detections) if detections else 0)
+                        fps_placeholder.metric("⚡ FPS", f"{fps:.1f}")
+                        conf_display.metric("🎯 Confidence", f"{conf_threshold:.2f}")
+                except Exception as e:
+                    status_placeholder.error(f"❌ Error: {str(e)}")
+                    time.sleep(0.1)
+        else:
+            st.info("👆 Klik 'Start' untuk memulai WebRTC webcam")
+    
+    # Local Webcam (Lokal saja)
+    elif detection_mode == "📹 Webcam (Local)":
+        st.subheader("🎥 Webcam Real-Time Detection (Local)")
         
         # Warning about webcam limitations
         st.warning(
-            "⚠️ **Webcam hanya bekerja di lokal (localhost), tidak tersedia di Streamlit Cloud!**\n\n"
-            "Jika Anda menggunakan Streamlit Cloud atau deployment online, gunakan fitur:\n"
+            "⚠️ **Mode ini hanya bekerja di lokal (localhost)!**\n\n"
+            "Gunakan WebRTC untuk cloud atau fitur:\n"
             "- 📷 **Upload Image** untuk mendeteksi gambar statis\n"
             "- 🎥 **Upload Video** untuk mendeteksi dari file video"
         )
