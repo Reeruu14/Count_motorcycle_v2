@@ -545,30 +545,16 @@ def main():
         iou = iou_threshold
         line_pos = line_position
         
-        # Initialize WebRTC session state
-        if "webrtc_playing" not in st.session_state:
-            st.session_state.webrtc_playing = False
-        
-        # Control buttons
-        col_btn1, col_btn2, col_btn3 = st.columns(3)
-        with col_btn1:
-            start_btn = st.button("🟢 Start Webcam", key="webrtc_start")
-        with col_btn2:
-            stop_btn = st.button("🔴 Stop Webcam", key="webrtc_stop")
-        with col_btn3:
-            reset_btn = st.button("🔄 Reset Count", key="webrtc_reset")
-        
-        if start_btn:
-            st.session_state.webrtc_playing = True
-        if stop_btn:
-            st.session_state.webrtc_playing = False
-        if reset_btn:
-            st.session_state.webrtc_total_count = 0
-            st.session_state.webrtc_current_det = 0
+        # Reset Count button
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("🔄 Reset Count", key="webrtc_reset"):
+                st.session_state.webrtc_total_count = 0
+                st.session_state.webrtc_current_det = 0
         
         st.markdown("---")
         
-        # Create streamer with desired_playing_state
+        # Create streamer - Auto start
         webrtc_ctx = webrtc_streamer(
             key="motorcycle-detection-webrtc",
             mode=WebRtcMode.SENDRECV,
@@ -576,7 +562,7 @@ def main():
             media_stream_constraints={"video": True, "audio": False},
             async_processing=False,
             video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou, frame_height, line_pos),
-            desired_playing_state=st.session_state.webrtc_playing
+            desired_playing_state=True  # Auto-start, user can click STOP button
         )
         
         col1, col2 = st.columns([2, 1])
@@ -585,7 +571,7 @@ def main():
             if webrtc_ctx.state.playing:
                 st.success("✅ Webcam aktif - Detection & Counting sedang berjalan")
             else:
-                st.info("👆 Klik tombol 'Start Webcam' untuk aktifkan")
+                st.info("⏸️ Webcam dihentikan - Klik START untuk melanjutkan")
         
         with col2:
             st.markdown("### 📈 Statistics")
