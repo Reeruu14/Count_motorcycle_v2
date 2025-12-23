@@ -545,7 +545,30 @@ def main():
         iou = iou_threshold
         line_pos = line_position
         
-        # Create streamer
+        # Initialize WebRTC session state
+        if "webrtc_playing" not in st.session_state:
+            st.session_state.webrtc_playing = False
+        
+        # Control buttons
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        with col_btn1:
+            start_btn = st.button("🟢 Start Webcam", key="webrtc_start")
+        with col_btn2:
+            stop_btn = st.button("🔴 Stop Webcam", key="webrtc_stop")
+        with col_btn3:
+            reset_btn = st.button("🔄 Reset Count", key="webrtc_reset")
+        
+        if start_btn:
+            st.session_state.webrtc_playing = True
+        if stop_btn:
+            st.session_state.webrtc_playing = False
+        if reset_btn:
+            st.session_state.webrtc_total_count = 0
+            st.session_state.webrtc_current_det = 0
+        
+        st.markdown("---")
+        
+        # Create streamer with desired_playing_state
         webrtc_ctx = webrtc_streamer(
             key="motorcycle-detection-webrtc",
             mode=WebRtcMode.SENDRECV,
@@ -553,7 +576,7 @@ def main():
             media_stream_constraints={"video": True, "audio": False},
             async_processing=False,
             video_processor_factory=lambda: MotorcycleProcessor(model, conf, iou, frame_height, line_pos),
-            desired_playing_state=True
+            desired_playing_state=st.session_state.webrtc_playing
         )
         
         col1, col2 = st.columns([2, 1])
@@ -562,7 +585,7 @@ def main():
             if webrtc_ctx.state.playing:
                 st.success("✅ Webcam aktif - Detection & Counting sedang berjalan")
             else:
-                st.info("👆 Klik tombol START untuk aktifkan webcam")
+                st.info("👆 Klik tombol 'Start Webcam' untuk aktifkan")
         
         with col2:
             st.markdown("### 📈 Statistics")
@@ -570,12 +593,6 @@ def main():
             st.metric("📍 Current", st.session_state.webrtc_current_det)
             st.metric("⚡ FPS", f"{st.session_state.webrtc_fps:.1f}")
             st.metric("🔍 Tracking", st.session_state.webrtc_active_tracks)
-        
-        # Reset button
-        if st.button("🔄 Reset Count", key="webrtc_reset"):
-            st.session_state.webrtc_total_count = 0
-            st.session_state.webrtc_current_det = 0
-            st.rerun()
     
     # Local Webcam (Lokal saja)
     elif detection_mode == "📹 Webcam (Local)":
