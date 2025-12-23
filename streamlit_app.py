@@ -486,11 +486,8 @@ def main():
             image = Image.open(uploaded_image)
             image_array = np.array(image)
             
-            # Convert RGB to BGR for OpenCV
-            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
-            else:
-                image_bgr = image_array
+            # Process image
+            image_bgr = image_array
             
             # Process image
             annotated_frame, detections = process_frame(
@@ -505,8 +502,12 @@ def main():
             
             with col1:
                 st.markdown("### Original Image")
-              Process image
-            image_bgr = image_array
+                st.image(image, use_column_width=True)
+            
+            with col2:
+                st.markdown("### Detection Result")
+                st.image(annotated_frame, use_column_width=True)
+            
             # Show statistics
             st.markdown("---")
             col1, col2, col3 = st.columns(3)
@@ -528,7 +529,7 @@ def main():
             if detections:
                 st.markdown("### 📋 Detection Details")
                 for i, det in enumerate(detections, 1):
-                st.image(annotated_frame
+                    st.write(f"**Detection {i}**: Confidence = {det['conf']:.2%}")
 
     elif detection_mode == "🎥 Upload Video":
         st.subheader("🎥 Video Detection")
@@ -576,7 +577,7 @@ def main():
                     iou_threshold
                 )
                 
-                st.image(annotated_frametColor(annotated_frame, cv2.COLOR_BGR2RGB)
+                st.image(annotated_frametColor(annotated_frame, cv2.COLOR_BGR2RGB))
                 st.image(annotated_rgb, use_column_width=True)
                 
                 # Show metrics
