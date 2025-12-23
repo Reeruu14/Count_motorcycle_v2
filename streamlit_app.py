@@ -467,8 +467,8 @@ def main():
             except Exception as e:
                 st.error(f"❌ Error saat menggunakan webcam: {str(e)}")
                 st.info("💡 Gunakan fitur 'Upload Video' atau 'Upload Image' untuk alternative")
-                st.sesDisplay frame
-                    frame_placeholder.image(annotated_frame
+                st.session_state.running = False
+        else:
             frame_placeholder.info("👆 Klik tombol '🟢 Start Camera' untuk memulai deteksi dan counting")
 
 
