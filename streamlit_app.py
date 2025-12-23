@@ -421,69 +421,105 @@ def main():
                 self.fps = 0
                 
             def recv(self, frame):
-                img = frame.to_ndarray(format="bgr24")
-                h, w = img.shape[:2]
-                
-                # Keep original resolution (no dynamic resizing)
-                # Jika perlu resize, lakukan with consistent ratio
-                target_width = 640
-                if w != target_width:
-                    scale = target_width / w
-                    new_w = target_width
-                    new_h = int(h * scale)
-                    img_pil = Image.fromarray(img)
-                    img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    img = np.array(img_pil)
+                try:
+                    # Get frame as BGR (OpenCV format)
+                    img = frame.to_ndarray(format="bgr24")
                     h, w = img.shape[:2]
+                    
+                    # Resize if needed (keep consistent ratio)
+                    target_width = 640
+                    if w != target_width:
+                        scale = target_width / w
+                        new_w = target_width
+                        new_h = int(h * scale)
+                        # Convert BGR to RGB for PIL
+                        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if CV2_AVAILABLE else img
+                        img_pil = Image.fromarray(img_rgb)
+                        img_pil = img_pil.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                        img = np.array(img_pil)
+                        # Convert back to BGR for YOLO
+                        if not isinstance(img, np.ndarray) or len(img.shape) != 3:
+                            img = np.array(img)
+                        h, w = img.shape[:2]
+                    
+                    # Process frame (YOLO expects BGR)
+                    try:
+                        annotated_frame, detections = process_frame(img, self.model, self.conf, self.iou)
+                    except Exception as e:
+                        print(f"Detection error: {str(e)}")
+                        annotated_frame = img.copy()
+                        detections = []
+                    
+                    # Update tracker dan hitung motorcycles
+                    if detections:
+                        track_info = self.tracker.update(detections)
+                    else:
+                        track_info = self.tracker.update([])
+                    
+                    # Draw counting line
+                    try:
+                        annotated_frame = self.tracker.draw_line(annotated_frame)
+                    except Exception as e:
+                        print(f"Draw line error: {str(e)}")
+                    
+                    # Calculate FPS
+                    self.frame_count += 1
+                    current_time = time.time()
+                    if (current_time - self.prev_time) >= 1.0:
+                        self.fps = self.frame_count / (current_time - self.prev_time)
+                        self.frame_count = 0
+                        self.prev_time = current_time
+                    
+                    # Add info text using OpenCV (more reliable)
+                    if CV2_AVAILABLE and isinstance(annotated_frame, np.ndarray):
+                        try:
+                            cv2.putText(annotated_frame, f"FPS: {self.fps:.1f}", (10, 30), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                            cv2.putText(annotated_frame, f"Current: {track_info['current_detections']}", (10, 70),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                            cv2.putText(annotated_frame, f"Total: {track_info['count']}", (10, 110),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
+                        except Exception as e:
+                            print(f"Text overlay error: {str(e)}")
+                    else:
+                        # Fallback: use PIL
+                        try:
+                            if isinstance(annotated_frame, np.ndarray):
+                                frame_pil = Image.fromarray(annotated_frame.astype('uint8'))
+                            else:
+                                frame_pil = annotated_frame
+                            
+                            draw = ImageDraw.Draw(frame_pil)
+                            try:
+                                font = ImageFont.load_default()
+                            except:
+                                font = None
+                            
+                            draw.text((10, 10), f"FPS: {self.fps:.1f}", fill=(0, 255, 0), font=font)
+                            draw.text((10, 30), f"Current: {track_info['current_detections']}", fill=(255, 0, 0), font=font)
+                            draw.text((10, 50), f"Total: {track_info['count']}", fill=(0, 165, 255), font=font)
+                            
+                            annotated_frame = np.array(frame_pil)
+                        except Exception as e:
+                            print(f"PIL text error: {str(e)}")
+                    
+                    # Ensure frame is uint8 and BGR for output
+                    if isinstance(annotated_frame, np.ndarray):
+                        annotated_frame = annotated_frame.astype(np.uint8)
+                    
+                    # Store info di session state untuk ditampilkan di sidebar
+                    st.session_state.webrtc_fps = self.fps
+                    st.session_state.webrtc_current_det = track_info['current_detections']
+                    st.session_state.webrtc_total_count = track_info['count']
+                    st.session_state.webrtc_active_tracks = track_info['active_tracks']
+                    
+                    # Return as VideoFrame
+                    return VideoFrame.from_ndarray(annotated_frame, format="bgr24")
                 
-                # Process frame
-                try:
-                    annotated_frame, detections = process_frame(img, self.model, self.conf, self.iou)
                 except Exception as e:
-                    print(f"Detection error: {str(e)}")
-                    annotated_frame = img
-                    detections = []
-                
-                # Update tracker dan hitung motorcycles
-                if detections:
-                    track_info = self.tracker.update(detections)
-                else:
-                    track_info = self.tracker.update([])
-                
-                # Draw counting line
-                annotated_frame = self.tracker.draw_line(annotated_frame)
-                
-                # Calculate FPS
-                self.frame_count += 1
-                current_time = time.time()
-                if (current_time - self.prev_time) >= 1.0:
-                    self.fps = self.frame_count / (current_time - self.prev_time)
-                    self.frame_count = 0
-                    self.prev_time = current_time
-                
-                # Add info text menggunakan PIL
-                frame_pil = Image.fromarray(annotated_frame.astype('uint8'))
-                draw = ImageDraw.Draw(frame_pil)
-                try:
-                    font = ImageFont.load_default()
-                except:
-                    font = None
-                
-                # Draw text on frame
-                draw.text((10, 10), f"FPS: {self.fps:.1f}", fill=(0, 255, 0), font=font)
-                draw.text((10, 30), f"Current: {track_info['current_detections']}", fill=(255, 0, 0), font=font)
-                draw.text((10, 50), f"Total Passed: {track_info['count']}", fill=(0, 165, 255), font=font)
-                
-                annotated_frame = np.array(frame_pil)
-                
-                # Store info di session state untuk ditampilkan di sidebar
-                st.session_state.webrtc_fps = self.fps
-                st.session_state.webrtc_current_det = track_info['current_detections']
-                st.session_state.webrtc_total_count = track_info['count']
-                st.session_state.webrtc_active_tracks = track_info['active_tracks']
-                
-                # Return as VideoFrame
-                return VideoFrame.from_ndarray(annotated_frame, format="bgr24")
+                    print(f"WebRTC recv error: {str(e)}")
+                    # Return original frame on error
+                    return frame
         
         # WebRTC configuration
         rtc_configuration = RTCConfiguration(
