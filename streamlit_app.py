@@ -8,6 +8,14 @@ from collections import defaultdict
 from scipy.spatial import distance
 import time
 import imageio
+import sys
+
+# ==================== ENVIRONMENT DETECTION ====================
+def is_cloud_environment():
+    """Detect if running on Streamlit Cloud or local"""
+    return "STREAMLIT_CLOUD" in os.environ or "KUBERNETES_SERVICE_HOST" in os.environ
+
+IS_CLOUD = is_cloud_environment()
 
 # ==================== MOTORCYCLE TRACKER ====================
 class MotorcycleTracker:
@@ -262,11 +270,22 @@ with st.sidebar:
     
     # Detection mode
     st.markdown("---")
-    detection_mode = st.radio(
-        "Detection Mode:",
-        ["📹 Webcam (with Counting)", "🖼️ Upload Image", "🎥 Upload Video"],
-        help="Pilih sumber input untuk deteksi"
-    )
+    
+    # Adjust available modes based on environment
+    if IS_CLOUD:
+        st.subheader("📋 Detection Mode")
+        st.info("☁️ Running on Streamlit Cloud - Webcam disabled for security")
+        detection_mode = st.radio(
+            "Choose Mode:",
+            ["🖼️ Upload Image", "🎥 Upload Video"],
+            help="Pilih sumber input untuk deteksi"
+        )
+    else:
+        detection_mode = st.radio(
+            "Detection Mode:",
+            ["📹 Webcam (with Counting)", "🖼️ Upload Image", "🎥 Upload Video"],
+            help="Pilih sumber input untuk deteksi"
+        )
     
     # Display info
     st.markdown("---")
@@ -329,7 +348,7 @@ def main():
         return
     
     # Main content based on selected mode
-    if detection_mode == "📹 Webcam (with Counting)":
+    if detection_mode == "📹 Webcam (with Counting)" and not IS_CLOUD:
         st.subheader("🎥 Webcam Real-Time Detection & Counting")
         
         # Warning about webcam limitations
