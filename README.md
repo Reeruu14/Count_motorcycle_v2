@@ -1,6 +1,7 @@
 # 🏍️ Motorcycle Detection & Counting System
 
-System deteksi dan counting sepeda motor menggunakan YOLOv8 dengan real-time tracking.
+Sitem deteksi dan hitung sepeda motor menggunakan YOLOv8 dengan real-time tracking.
+https://countmotorcyclev2-5aapp6euqkkn2p7acselvhm.streamlit.app/
 
 ## ✨ Features
 
@@ -120,23 +121,12 @@ ModuleNotFoundError: No module named 'cv2'
 - **FPS**: Frame rate saat ini
 - **Confidence**: Threshold confidence yang digunakan
 
-## ✅ Updates & Fixes
-
 ### Latest Updates:
 - ✅ Fixed `numpy` compatibility dengan Python 3.13 (1.26.0+)
 - ✅ Changed `opencv-python` → `opencv-python-headless` untuk Streamlit Cloud
 - ✅ Fixed `pyyaml` dependency issue
 - ✅ Added better error handling untuk webcam
 - ✅ Compatible dengan Streamlit Cloud deployment
-
-## 💬 Support
-
-Untuk issues atau questions:
-- Check troubleshooting section
-- Review code comments
-- Check error messages
-
----
 
 GITHUB LINK : https://github.com/Reeruu14/Count_motorcycle_v2.git
 STREAMLIT LINK : https://countmotorcyclev2-5aapp6euqkkn2p7acselvhm.streamlit.app/
